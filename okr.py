@@ -9,6 +9,7 @@ import openpyxl
 from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 from openpyxl.utils import get_column_letter
 import io
+import os
 
 st.set_page_config(page_title="OKR Scoring System", page_icon="📊", layout="wide")
 
