@@ -243,7 +243,7 @@ def fetch_all_data(cycle_path):
 
 # Define User class for OKR tracking
 class User:
-    def __init__(self, user_id, name, co_OKR=1, checkin=0, dich_chuyen_OKR=0, score=0):
+    def __init__(self, user_id, name, co_OKR=1, checkin=0.5, dich_chuyen_OKR=0, score=0):
         """Initialize a user with basic attributes."""
         self.user_id = str(user_id)
         self.name = name
@@ -259,11 +259,11 @@ class User:
 
     def calculate_score(self):
         """Calculate score based on criteria: check-in, OKR and OKR movement."""
-        score = 0
+        score = 0.5
 
         # Check-in contributes 1 point
         if self.checkin == 1:
-            score += 1
+            score += 0.5
 
         # Having OKR contributes 1 point
         if self.co_OKR == 1:
@@ -334,7 +334,7 @@ class UserManager:
                 user.checkin = 1
 
     def has_weekly_checkins(self, user_id):
-        """Check if user has at least one check-in each week in the current month."""
+        """Kiểm tra xem user có check-in ít nhất 3 tuần trong tháng hiện tại không."""
         today = datetime.now(timezone.utc)
         current_month = today.month
         current_year = today.year
@@ -342,33 +342,27 @@ class UserManager:
 
         checkins = []
 
-        # Collect all check-ins for the user
-        if not self.checkin_df.empty and 'user_id' in self.checkin_df.columns and 'day' in self.checkin_df.columns:
-            user_checkins = self.checkin_df[self.checkin_df['user_id'].astype(str) == user_id]
-            for _, entry in user_checkins.iterrows():
-                checkins.append(datetime.fromtimestamp(entry.get("day"), tz=timezone.utc))
+        # Thu thập tất cả các lần check-in của user
+        for page_data in self.checkin_data.values():
+            for entry in page_data:
+                if str(entry.get("user_id")) == user_id:
+                    checkins.append(datetime.fromtimestamp(entry.get("day"), tz=timezone.utc))
 
-        # Filter check-ins in current month
+        # Lọc ra các lần check-in trong tháng hiện tại
         checkins_in_month = [dt for dt in checkins if dt.month == current_month and dt.year == current_year]
 
         if not checkins_in_month:
-            return False  # If no check-ins in month, definitely False
+            return False  # Không có check-in nào trong tháng -> False
 
-        # Determine first week of current month
+        # Xác định tuần đầu tiên và tuần cuối cùng của tháng hiện tại
         first_day_of_month = datetime(current_year, current_month, 1, tzinfo=timezone.utc)
         start_week = first_day_of_month.isocalendar()[1]
 
-        # Store check-ins by week
-        weekly_checkins = defaultdict(int)
-        for dt in checkins_in_month:
-            week_number = dt.isocalendar()[1]
-            weekly_checkins[week_number] += 1
+        # Lưu số tuần có check-in
+        weekly_checkins = set(dt.isocalendar()[1] for dt in checkins_in_month)
 
-        # List of weeks requiring check-ins
-        weeks_in_month = set(range(start_week, current_week + 1))
-
-        # Check if user has checked in for all those weeks
-        return all(weekly_checkins[w] > 0 for w in weeks_in_month)
+        # Kiểm tra xem user đã check-in ít nhất 3 tuần trong tháng chưa
+        return len(weekly_checkins) >= 3
 
     def calculate_scores(self):
         """Calculate score for all users."""
@@ -525,27 +519,27 @@ def generate_data_table(users):
     return df
 
 # Add this function to your file
-def export_to_excel(users, filename="okr_scores.xlsx"):
+def export_to_excel(users, filename="output1.xlsx"):
     """
-    Export OKR data of users to an Excel file with an improved interface.
-    
-    Requirements:
-      - Each user must have attributes: name, co_OKR, checkin, dich_chuyen_OKR, score
+    Xuất dữ liệu OKRs của danh sách users ra file Excel với giao diện được cải tiến.
+
+    Yêu cầu:
+      - Mỗi user phải có các thuộc tính: name, co_OKR, checkin, dich_chuyen_OKR, score
     """
-    # Create workbook and sheet
+    # Tạo workbook và sheet
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "OKRs"
 
-    # Define styles
+    # Định nghĩa style
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     category_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     category_font = Font(bold=True)
     thin_border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
 
-    # --- Main title ---
-    total_columns = 3 + len(users)  # 3 fixed columns + number of users
+    # --- Tiêu đề chính ---
+    total_columns = 3 + len(users)  # 3 cột cố định + số user
     last_col_letter = get_column_letter(total_columns)
     ws.merge_cells(f"A1:{last_col_letter}1")
     title_cell = ws["A1"]
@@ -553,7 +547,7 @@ def export_to_excel(users, filename="okr_scores.xlsx"):
     title_cell.font = Font(size=14, bold=True)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # --- Header (row 2) ---
+    # --- Header (dòng 2) ---
     fixed_headers = ["TT", "Nội dung", "Tự chấm điểm"]
     user_headers = [user.name for user in users]
     headers = fixed_headers + user_headers
@@ -563,16 +557,16 @@ def export_to_excel(users, filename="okr_scores.xlsx"):
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
-        # Set default width for columns
+        # Đặt độ rộng mặc định cho các cột
         col_letter = get_column_letter(col_idx)
         if col_idx == 2:
-            ws.column_dimensions[col_letter].width = 70  # Longer content
+            ws.column_dimensions[col_letter].width = 70  # Nội dung dài hơn
         elif col_idx == 1:
             ws.column_dimensions[col_letter].width = 5
         else:
             ws.column_dimensions[col_letter].width = 15
 
-    # --- Criteria rows (starting from row 3) ---
+    # --- Các dòng tiêu chí (bắt đầu từ dòng 3) ---
     criteria = [
         [1, "Đầy đủ OKRs cá nhân được cập nhật trên Base Goal (Mục tiêu cá nhân + Đường dẫn)", 1],
         [2, "Có Check-in trên base hàng tuần (Mỗi tuần ít nhất 1 lần check-in)", 0.5],
@@ -594,29 +588,29 @@ def export_to_excel(users, filename="okr_scores.xlsx"):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = thin_border
-            # Mark category column (if first value is a sequence number) with background color and bold
+            # Đánh dấu cột loại (nếu giá trị đầu tiên là số thứ tự) với màu nền và in đậm
             if col_idx == 1 and isinstance(value, int):
                 cell.fill = category_fill
                 cell.font = category_font
 
-    # --- Write data for each user ---
-    # Users will be displayed from column 4 onwards
+    # --- Ghi dữ liệu của từng user ---
+    # Các user sẽ được hiển thị từ cột 4 trở đi
     for idx, user in enumerate(users, start=1):
-        col_idx = 3 + idx  # columns 1-3 are reserved for fixed headers
+        col_idx = 3 + idx  # cột thứ 1-3 đã dành cho tiêu đề cố định
         col_letter = get_column_letter(col_idx)
-        # 1. Evaluate personal OKRs (row 3)
+        # 1. Đánh giá OKRs cá nhân (dòng 3)
         ws.cell(row=3, column=col_idx, value=1 if user.co_OKR == 1 else 0)
-        # 2. Weekly check-in (row 4)
+        # 2. Check-in hàng tuần (dòng 4)
         ws.cell(row=4, column=col_idx, value=0.5 if user.checkin == 1 else 0)
-        # 3. Check-in with others (row 5)
-        ws.cell(row=5, column=col_idx, value=0.5 if user.checkin == 1 else 0)
-        
-        # 4. OKR movement:
-        # Row 6 displays % movement, rows 7 to 13 display corresponding points
+        # 3. Check-in với người khác (dòng 5)
+        ws.cell(row=5, column=col_idx, value=0.5 )
+
+        # 4. Dịch chuyển OKR:
+        # Dòng 6 hiển thị % dịch chuyển, các dòng từ 7 đến 13 hiển thị điểm tương ứng
         movement = user.dich_chuyen_OKR
         ws.cell(row=6, column=col_idx, value=f"{movement}%")
-        
-        # Determine movement points based on % and score line:
+
+        # Xác định điểm dịch chuyển dựa theo % và dòng ghi điểm:
         if movement < 10:
             score_value = 0.15
             movement_row = 7
@@ -639,22 +633,22 @@ def export_to_excel(users, filename="okr_scores.xlsx"):
             score_value = 2.5
             movement_row = 13
         ws.cell(row=movement_row, column=col_idx, value=score_value)
-        
-        # 5. Total score: use SUM function from row 3 to row 13
-        formula = f"=SUM({col_letter}3:{col_letter}13)"
+
+        # 5. Tổng điểm: sử dụng công thức SUM từ dòng 3 đến dòng 13
+        formula = user.score
         ws.cell(row=14, column=col_idx, value=formula)
-        
-        # Apply border and center alignment to user data cells
+
+        # Áp dụng border và căn giữa cho các ô dữ liệu của user
         for r in range(3, 15):
             cell = ws.cell(row=r, column=col_idx)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = thin_border
 
-    # --- Freeze panes to fix header and criteria ---
+    # --- Freeze panes để cố định header và tiêu chí ---
     ws.freeze_panes = ws["D3"]
 
-    # --- Auto-adjust column width (if needed) ---
-    # Loop through columns to calculate width based on content
+    # --- Tự động điều chỉnh độ rộng cột (nếu cần) ---
+    # Vòng lặp qua các cột để tính độ rộng dựa trên nội dung
     for col in ws.columns:
         max_length = 0
         col_letter = get_column_letter(col[0].column)
