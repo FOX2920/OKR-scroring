@@ -332,35 +332,35 @@ class UserManager:
         for user in self.users.values():
             if self.has_weekly_checkins(user.user_id):
                 user.checkin = 1
-
+    
     def has_weekly_checkins(self, user_id):
         """Kiểm tra xem user có check-in ít nhất 3 tuần trong tháng hiện tại không."""
         today = datetime.now(timezone.utc)
         current_month = today.month
         current_year = today.year
-        current_week = today.isocalendar()[1]
-
+        
         checkins = []
-
-        # Thu thập tất cả các lần check-in của user
-        for page_data in self.checkin_data.values():
-            for entry in page_data:
-                if str(entry.get("user_id")) == user_id:
-                    checkins.append(datetime.fromtimestamp(entry.get("day"), tz=timezone.utc))
-
+        
+        # Thu thập tất cả các lần check-in của user từ checkin_df
+        if not self.checkin_df.empty and 'user_id' in self.checkin_df.columns and 'day' in self.checkin_df.columns:
+            user_checkins = self.checkin_df[self.checkin_df['user_id'].astype(str) == str(user_id)]
+            
+            for _, entry in user_checkins.iterrows():
+                checkin_date = datetime.fromtimestamp(float(entry.get('day')), tz=timezone.utc)
+                checkins.append(checkin_date)
+        
         # Lọc ra các lần check-in trong tháng hiện tại
         checkins_in_month = [dt for dt in checkins if dt.month == current_month and dt.year == current_year]
-
+        
         if not checkins_in_month:
             return False  # Không có check-in nào trong tháng -> False
-
+        
         # Xác định tuần đầu tiên và tuần cuối cùng của tháng hiện tại
         first_day_of_month = datetime(current_year, current_month, 1, tzinfo=timezone.utc)
-        start_week = first_day_of_month.isocalendar()[1]
-
+        
         # Lưu số tuần có check-in
         weekly_checkins = set(dt.isocalendar()[1] for dt in checkins_in_month)
-
+        
         # Kiểm tra xem user đã check-in ít nhất 3 tuần trong tháng chưa
         return len(weekly_checkins) >= 3
 
