@@ -243,7 +243,7 @@ def fetch_all_data(cycle_path):
 
 # Define User class for OKR tracking
 class User:
-    def __init__(self, user_id, name, co_OKR=1, checkin=0.5, dich_chuyen_OKR=0, score=0):
+    def __init__(self, user_id, name, co_OKR=1, checkin=0, dich_chuyen_OKR=0, score=0):
         """Initialize a user with basic attributes."""
         self.user_id = str(user_id)
         self.name = name
