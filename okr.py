@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from collections import defaultdict
 import pandas as pd
 import json
@@ -55,6 +55,24 @@ st.sidebar.markdown("## OKR Configuration")
 GOAL_ACCESS_TOKEN = os.getenv("GOAL_ACCESS_TOKEN")
 ACCOUNT_ACCESS_TOKEN = os.getenv("ACCOUNT_ACCESS_TOKEN")
 GOOGLE_SHEETS_API_URL = os.getenv("GOOGLE_SHEETS_API_URL")
+
+# Helper function to get current quarter start date
+def get_current_quarter_start():
+    """Get the first day of the first month of the current quarter"""
+    today = date.today()
+    current_month = today.month
+    
+    # Determine which quarter we're in and get the start month
+    if current_month <= 3:  # Q1: Jan-Mar
+        quarter_start_month = 1
+    elif current_month <= 6:  # Q2: Apr-Jun
+        quarter_start_month = 4
+    elif current_month <= 9:  # Q3: Jul-Sep
+        quarter_start_month = 7
+    else:  # Q4: Oct-Dec
+        quarter_start_month = 10
+    
+    return date(today.year, quarter_start_month, 1)
 
 # Cache functions to improve performance
 @st.cache_data(ttl=3600)
@@ -327,17 +345,23 @@ class UserManager:
 
         return users
 
-    def update_checkins(self):
+    def update_checkins(self, start_date=None, end_date=None):
         """Check and update check-in status for each user."""
         for user in self.users.values():
-            if self.has_weekly_checkins(user.user_id):
+            if self.has_weekly_checkins(user.user_id, start_date, end_date):
                 user.checkin = 1
     
-    def has_weekly_checkins(self, user_id):
-        """Kiểm tra xem user có check-in ít nhất 3 tuần trong tháng hiện tại không."""
-        today = datetime.now(timezone.utc)
-        current_month = today.month
-        current_year = today.year
+    def has_weekly_checkins(self, user_id, start_date=None, end_date=None):
+        """Kiểm tra xem user có check-in ít nhất 3 tuần trong khoảng thời gian đã chỉ định không."""
+        # Set default date range if not provided
+        if start_date is None:
+            start_date = get_current_quarter_start()
+        if end_date is None:
+            end_date = date.today()
+            
+        # Convert to datetime with timezone for comparison
+        start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
         
         checkins = []
         
@@ -349,19 +373,16 @@ class UserManager:
                 checkin_date = datetime.fromtimestamp(float(entry.get('day')), tz=timezone.utc)
                 checkins.append(checkin_date)
         
-        # Lọc ra các lần check-in trong tháng hiện tại
-        checkins_in_month = [dt for dt in checkins if dt.month == current_month and dt.year == current_year]
+        # Lọc ra các lần check-in trong khoảng thời gian đã chỉ định
+        checkins_in_range = [dt for dt in checkins if start_datetime <= dt <= end_datetime]
         
-        if not checkins_in_month:
-            return False  # Không có check-in nào trong tháng -> False
-        
-        # Xác định tuần đầu tiên và tuần cuối cùng của tháng hiện tại
-        first_day_of_month = datetime(current_year, current_month, 1, tzinfo=timezone.utc)
+        if not checkins_in_range:
+            return False  # Không có check-in nào trong khoảng thời gian -> False
         
         # Lưu số tuần có check-in
-        weekly_checkins = set(dt.isocalendar()[1] for dt in checkins_in_month)
+        weekly_checkins = set(dt.isocalendar()[1] for dt in checkins_in_range)
         
-        # Kiểm tra xem user đã check-in ít nhất 3 tuần trong tháng chưa
+        # Kiểm tra xem user đã check-in ít nhất 3 tuần trong khoảng thời gian chưa
         return len(weekly_checkins) >= 3
 
     def calculate_scores(self):
@@ -701,6 +722,33 @@ def main():
     if selected_cycle_name:
         selected_cycle_path = cycle_options[selected_cycle_name]
         
+        # Add date range selector
+        st.sidebar.markdown("## Date Range for Check-ins")
+        st.sidebar.markdown("*Filter check-ins within the specified date range*")
+        
+        # Default dates: from current quarter start to today
+        default_start_date = get_current_quarter_start()
+        default_end_date = date.today()
+        
+        start_date = st.sidebar.date_input(
+            "Start Date",
+            value=default_start_date,
+            key="start_date"
+        )
+        
+        end_date = st.sidebar.date_input(
+            "End Date",
+            value=default_end_date,
+            key="end_date"
+        )
+          # Validate date range
+        if isinstance(start_date, date) and isinstance(end_date, date) and start_date > end_date:
+            st.sidebar.error("Start date must be before or equal to end date!")
+            return
+        
+        if isinstance(start_date, date) and isinstance(end_date, date):
+            st.sidebar.info(f"Analyzing check-ins from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}")
+        
         # Add a Calculate button
         if st.sidebar.button("Calculate Scores", key="calculate_btn"):
             st.session_state.calculate_clicked = True
@@ -712,8 +760,8 @@ def main():
                 # Initialize UserManager
                 manager = UserManager(account_df, krs_df, checkin_df, cycle_df)
                 
-                # Update check-ins
-                manager.update_checkins()
+                # Update check-ins with date range
+                manager.update_checkins(start_date, end_date)
                 
                 # Update OKR movement
                 manager.update_okr_movement()
@@ -724,8 +772,9 @@ def main():
                 # Get users
                 users = manager.get_users()
                 
-                # Store users in session state
+                # Store users and date range in session state
                 st.session_state.users = users
+                st.session_state.date_range = (start_date, end_date)
                 
                 st.success("Scores calculated successfully!")
             else:
@@ -734,6 +783,11 @@ def main():
         # Display results if calculation was done
         if hasattr(st.session_state, 'calculate_clicked') and st.session_state.calculate_clicked and hasattr(st.session_state, 'users'):
             st.markdown("<h2 class='sub-header'>OKR Scoring Results</h2>", unsafe_allow_html=True)
+              # Display the date range used for calculation
+            if hasattr(st.session_state, 'date_range'):
+                start_str, end_str = st.session_state.date_range
+                if isinstance(start_str, date) and isinstance(end_str, date):
+                    st.info(f"📅 Check-ins analyzed from **{start_str.strftime('%d/%m/%Y')}** to **{end_str.strftime('%d/%m/%Y')}**")
             
             # Display metrics
             display_user_metrics(st.session_state.users)
@@ -742,17 +796,9 @@ def main():
             df = generate_data_table(st.session_state.users)
             
             # Sort by score descending
-            df = df.sort_values(by="Score", ascending=False)
-            
-            # Apply styling
+            df = df.sort_values(by="Score", ascending=False)            # Apply styling
             st.markdown("<h3 class='sub-header'>User Scores</h3>", unsafe_allow_html=True)
-            st.dataframe(
-                df.style.applymap(
-                    lambda x: 'background-color: #BBDEFB' if isinstance(x, (int, float)) and x > 3 else None,
-                    subset=['Score']
-                ),
-                use_container_width=True
-            )
+            st.dataframe(df, use_container_width=True)
             
             # New Excel download button
             excel_wb = export_to_excel(st.session_state.users)
